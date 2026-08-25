@@ -1,0 +1,1943 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Apple Music Pro Master Studio</title>
+  <!-- MP3タグ解析ライブラリ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+
+  <style>
+    :root {
+      --bg-base: #060709;
+      --card-bg: rgba(255, 255, 255, 0.08);
+      --card-border: rgba(255, 255, 255, 0.16);
+      --text-main: #ffffff;
+      --text-sub: rgba(255, 255, 255, 0.65);
+      --accent-color: #fa2d48;
+      --accent-glow: rgba(250, 45, 72, 0.5);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: var(--bg-base);
+      overflow: hidden;
+      position: relative;
+      color: var(--text-main);
+      perspective: 1000px; /* 3Dパララックス用 */
+    }
+
+    /* 背景オーロラ Canvas */
+    #auroraCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      filter: blur(60px) saturate(1.9);
+      opacity: 0.75;
+      pointer-events: none;
+    }
+
+    /* 全体レイアウト */
+    .app-container {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+      width: 95%;
+      max-width: 960px;
+      height: 88vh;
+    }
+
+    /* Dynamic Island ミニプレイヤー */
+    .dynamic-island {
+      position: fixed;
+      top: 16px;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 30px;
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      transform: translateY(-80px);
+      opacity: 0;
+    }
+
+    .dynamic-island.active { transform: translateY(0); opacity: 1; }
+
+    .island-art {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      object-fit: cover;
+      animation: spin 6s linear infinite;
+      animation-play-state: paused;
+    }
+
+    .playing .island-art { animation-play-state: running; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    .island-info {
+      font-size: 12px;
+      font-weight: 600;
+      max-width: 120px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .island-wave {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      height: 14px;
+    }
+
+    .island-wave span {
+      width: 3px;
+      height: 100%;
+      background: var(--accent-color);
+      border-radius: 3px;
+      animation: bounce 0.6s ease-in-out infinite alternate;
+    }
+    .island-wave span:nth-child(2) { animation-delay: 0.2s; }
+    .island-wave span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce { 0% { height: 3px; } 100% { height: 14px; } }
+
+    /* メイン プレイヤーカード (3Dパララックス対応) */
+    .player-card {
+      width: 100%;
+      max-width: 380px;
+      padding: 22px 20px 18px;
+      border-radius: 36px;
+      background: var(--card-bg);
+      backdrop-filter: blur(40px) saturate(190%);
+      -webkit-backdrop-filter: blur(40px) saturate(190%);
+      border: 1px solid var(--card-border);
+      box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: transform 0.2s ease-out;
+      transform-style: preserve-3d;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .card-header-tools {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      gap: 6px;
+    }
+
+    .tool-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text-main);
+      padding: 5px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: 0.2s;
+    }
+
+    .tool-btn.active {
+      background: var(--accent-color);
+      box-shadow: 0 0 12px var(--accent-glow);
+      border-color: transparent;
+    }
+
+    /* アートワーク & 飛び出すホログラムCD */
+    .artwork-cd-wrapper {
+      position: relative;
+      width: 230px;
+      height: 230px;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    /* 飛び出すCD */
+    .vinyl-disk {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 210px;
+      height: 210px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #1a1a1a 28%, #0d0d0d 30%, #222 45%, #111 65%, #000 100%);
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(255, 255, 255, 0.15);
+      z-index: 1;
+      transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      pointer-events: none;
+    }
+
+    .vinyl-disk::after {
+      content: '';
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #fff 15%, transparent 16%), repeating-radial-gradient(#fa2d48, #fa2d48 4px, #111 5px, #111 8px);
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+
+    /* 再生時にCDが右に飛び出して回転 */
+    .playing .vinyl-disk {
+      transform: translateX(55px) rotate(360deg);
+      animation: vinylSpin 4s linear infinite;
+    }
+    @keyframes vinylSpin { 100% { transform: translateX(55px) rotate(720deg); } }
+
+    .artwork-container {
+      position: relative;
+      z-index: 2;
+      width: 230px;
+      height: 230px;
+      border-radius: 22px;
+      overflow: hidden;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+      background: rgba(0, 0, 0, 0.4);
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .playing .artwork-container { transform: scale(1.02); }
+
+    .artwork-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+
+    .artwork-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-sub);
+      font-size: 12px;
+      text-align: center;
+      padding: 15px;
+    }
+
+    .artwork-placeholder svg { width: 38px; height: 38px; stroke: var(--text-sub); }
+
+    /* 曲情報 */
+    .track-info {
+      width: 100%;
+      text-align: left;
+      margin-bottom: 12px;
+      cursor: pointer;
+    }
+
+    .track-title {
+      font-size: 19px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+
+    .track-artist {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-sub);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* プログレスバー（スライドシーク完全同期） */
+    .progress-container {
+      width: 100%;
+      margin-bottom: 12px;
+      cursor: pointer;
+      padding: 10px 0;
+      position: relative;
+      touch-action: none;
+    }
+
+    .progress-bar-wrapper {
+      position: relative;
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 999px;
+      transition: height 0.15s ease;
+      pointer-events: none;
+    }
+
+    .progress-container:hover .progress-bar-wrapper,
+    .progress-container.dragging .progress-bar-wrapper {
+      height: 8px;
+    }
+
+    .progress-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 0%;
+      background: #ffffff;
+      border-radius: 999px;
+      pointer-events: none;
+    }
+
+    .progress-thumb {
+      position: absolute;
+      top: 50%;
+      right: -4px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+      transform: translateY(-50%) scale(0);
+      transition: transform 0.15s ease;
+    }
+
+    .progress-container:hover .progress-thumb,
+    .progress-container.dragging .progress-thumb {
+      transform: translateY(-50%) scale(1.3);
+    }
+
+    .ab-marker {
+      position: absolute;
+      top: -3px;
+      width: 3px;
+      height: 12px;
+      background: #ffd60a;
+      border-radius: 2px;
+      display: none;
+      z-index: 5;
+    }
+
+    .time-info {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-sub);
+      font-variant-numeric: tabular-nums;
+      pointer-events: none;
+    }
+
+    /* コントロール */
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 82%;
+      margin-bottom: 12px;
+    }
+
+    .btn {
+      background: none;
+      border: none;
+      color: var(--text-main);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s ease, opacity 0.2s;
+    }
+
+    .btn:active { transform: scale(0.88); }
+    .btn:disabled { opacity: 0.25; cursor: not-allowed; }
+    .btn-side svg { width: 28px; height: 28px; fill: currentColor; }
+
+    .btn-play {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: #ffffff;
+      color: #000000;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn-play svg { width: 22px; height: 22px; fill: currentColor; margin-left: 2px; }
+    .btn-play.playing svg { margin-left: 0; }
+
+    /* ボトムバー */
+    .bottom-bar {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 10px;
+    }
+
+    .icon-btn {
+      background: none;
+      border: none;
+      color: var(--text-sub);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      font-size: 9px;
+      font-weight: 600;
+      transition: 0.2s;
+    }
+
+    .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
+    .icon-btn.active, .icon-btn:hover { color: var(--text-main); }
+    .icon-btn.highlight { color: var(--accent-color); }
+
+    /* リアルタイム波形パネル (右側) */
+    .visualizer-panel {
+      flex: 1;
+      height: 100%;
+      max-height: 540px;
+      border-radius: 36px;
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(40px);
+      -webkit-backdrop-filter: blur(40px);
+      border: 1px solid var(--card-border);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+    }
+
+    #liveVisualizerCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* モーダル */
+    .sheet-modal {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%) translateY(100%);
+      width: 94%;
+      max-width: 440px;
+      max-height: 85vh;
+      background: rgba(16, 17, 22, 0.95);
+      backdrop-filter: blur(50px);
+      -webkit-backdrop-filter: blur(50px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-bottom: none;
+      border-radius: 32px 32px 0 0;
+      padding: 22px 20px 28px;
+      z-index: 200;
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 -20px 50px rgba(0,0,0,0.7);
+    }
+
+    .sheet-modal.open { transform: translateX(-50%) translateY(0); }
+
+    .sheet-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .sheet-title { font-size: 16px; font-weight: 700; }
+
+    .close-btn {
+      background: rgba(255, 255, 255, 0.15);
+      border: none;
+      color: #fff;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    /* 歌詞 */
+    .lyrics-container {
+      overflow-y: auto;
+      height: 260px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      padding: 40px 24px;
+      scroll-behavior: smooth;
+    }
+
+    .lyrics-line {
+      font-size: 19px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.25);
+      filter: blur(1.5px);
+      transition: all 0.35s ease;
+      cursor: pointer;
+      text-align: center;
+      padding: 4px 12px;
+      border-radius: 12px;
+      transform-origin: center center;
+    }
+
+    .lyrics-line.current {
+      color: #ffffff;
+      filter: blur(0);
+      transform: scale(1.08);
+      text-shadow: 0 0 16px rgba(255, 255, 255, 0.8), 0 0 32px var(--accent-glow);
+    }
+
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .slider-row input[type="range"] {
+      width: 55%;
+      accent-color: var(--accent-color);
+    }
+
+    .preset-chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .chip {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 5px 12px;
+      border-radius: 16px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .chip.active { background: #ffffff; color: #000; }
+
+    /* プログレスバー */
+    .export-progress-box {
+      margin-top: 14px;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 12px;
+      border-radius: 16px;
+      display: none;
+    }
+
+    .export-progress-bar {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .export-progress-fill {
+      width: 0%;
+      height: 100%;
+      background: var(--accent-color);
+      transition: width 0.1s linear;
+    }
+
+    @media (max-width: 840px) {
+      .visualizer-panel { display: none; }
+      .app-container { justify-content: center; }
+    }
+
+    #file-input, #lrc-input { display: none; }
+  </style>
+</head>
+<body>
+
+  <!-- 背景オーロラ Canvas -->
+  <canvas id="auroraCanvas"></canvas>
+
+  <!-- Dynamic Island ミニプレイヤー -->
+  <div class="dynamic-island" id="dynamicIsland" title="クリックでプレイヤーを展開">
+    <img src="" class="island-art" id="islandArt">
+    <div class="island-info" id="islandTitle">再生待機中</div>
+    <div class="island-wave"><span></span><span></span><span></span></div>
+  </div>
+
+  <div class="app-container">
+    
+    <!-- メイン プレイヤーカード (左) -->
+    <div class="player-card" id="playerCard">
+      <div class="card-header-tools">
+        <button class="tool-btn" id="demoSongBtn">⚡ デモ曲生成</button>
+        <button class="tool-btn" id="spatialBtn">🌐 8D音響: OFF</button>
+        <button class="tool-btn" id="miniToggleBtn">🏝️ Mini化</button>
+      </div>
+
+      <!-- アートワーク ＆ 飛び出すホログラムCD -->
+      <div class="artwork-cd-wrapper">
+        <div class="vinyl-disk"></div>
+        <div class="artwork-container" id="artworkBtn" title="クリックして曲を追加">
+          <img src="" alt="Cover Art" class="artwork-img" id="artworkImg">
+          <div class="artwork-placeholder" id="artworkPlaceholder">
+            <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            <span>MP3を選択<br>(複数・D&D可)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 曲情報 -->
+      <div class="track-info" id="trackInfoBtn">
+        <div class="track-title" id="trackTitle">楽曲が未選択です</div>
+        <div class="track-artist" id="trackArtist">ここをタップしてMP3を追加</div>
+      </div>
+
+      <!-- プログレスバー -->
+      <div class="progress-container" id="progressContainer">
+        <div class="progress-bar-wrapper">
+          <div class="progress-bar" id="progressBar">
+            <div class="progress-thumb"></div>
+          </div>
+          <div class="ab-marker" id="markerA"></div>
+          <div class="ab-marker" id="markerB"></div>
+        </div>
+        <div class="time-info">
+          <span id="currentTime">0:00</span>
+          <span id="remainingTime">-0:00</span>
+        </div>
+      </div>
+
+      <!-- 再生コントロール -->
+      <div class="controls">
+        <button class="btn btn-side" id="prevBtn" disabled title="前の曲">
+          <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button class="btn btn-play" id="playBtn" disabled title="再生">
+          <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button class="btn btn-side" id="nextBtn" disabled title="次の曲">
+          <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
+      </div>
+
+      <!-- ボトムバー -->
+      <div class="bottom-bar">
+        <button class="icon-btn" id="lyricsBtn">
+          <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          <span>歌詞/Sing</span>
+        </button>
+        <button class="icon-btn" id="eqBtn">
+          <svg viewBox="0 0 24 24"><path d="M10 20h4V4h-4v16zm-6 0h4v-8H4v8zM16 9v11h4V9h-4z"/></svg>
+          <span>音質/EQ</span>
+        </button>
+        <button class="icon-btn" id="fxBtn">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          <span>FX変調</span>
+        </button>
+        <button class="icon-btn" id="abRepeatBtn">
+          <svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+          <span id="abRepeatLabel">ABリピート</span>
+        </button>
+        <button class="icon-btn highlight" id="exportModalBtn">
+          <svg viewBox="0 0 24 24"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+          <span>動画生成</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- リアルタイム波形パネル (右) -->
+    <div class="visualizer-panel" id="visualizerPanel">
+      <canvas id="liveVisualizerCanvas"></canvas>
+    </div>
+
+  </div>
+
+  <!-- モーダル: 歌詞 & タイミング調整 -->
+  <div class="sheet-modal" id="lyricsModal">
+    <div class="sheet-header">
+      <div class="sheet-title">🎤 歌詞 & Sing & タイミング補正</div>
+      <button class="close-btn" onclick="closeModals()">✕</button>
+    </div>
+    <div class="slider-group" style="margin-bottom: 8px;">
+      <div class="slider-row">
+        <span>ボーカル消去 (Sing)</span>
+        <input type="range" id="vocalSlider" min="0" max="100" value="0">
+      </div>
+      <div class="slider-row">
+        <span>歌詞タイミング微調整</span>
+        <input type="range" id="offsetSlider" min="-1.5" max="1.5" step="0.05" value="0">
+      </div>
+    </div>
+    <button class="tool-btn" style="margin-bottom: 6px;" onclick="document.getElementById('lrc-input').click()">
+      📝 LRC歌詞ファイルを読み込む
+    </button>
+    <div class="lyrics-container" id="lyricsContainer"></div>
+  </div>
+
+  <!-- モーダル: イコライザー & 睡眠タイマー -->
+  <div class="sheet-modal" id="eqModal">
+    <div class="sheet-header">
+      <div class="sheet-title">🎚️ イコライザー & 睡眠タイマー</div>
+      <button class="close-btn" onclick="closeModals()">✕</button>
+    </div>
+    <div class="slider-group">
+      <div class="slider-row">
+        <span>重低音 (Bass)</span>
+        <input type="range" id="bassSlider" min="-12" max="12" value="0">
+      </div>
+      <div class="slider-row">
+        <span>中音域 (Mid)</span>
+        <input type="range" id="midSlider" min="-12" max="12" value="0">
+      </div>
+      <div class="slider-row">
+        <span>高音域 (Treble)</span>
+        <input type="range" id="trebleSlider" min="-12" max="12" value="0">
+      </div>
+    </div>
+    <div class="preset-chips">
+      <div class="chip active" onclick="setEQPreset(0,0,0,this)">Flat</div>
+      <div class="chip" onclick="setEQPreset(8,1,-2,this)">Bass Boost</div>
+      <div class="chip" onclick="setEQPreset(-3,5,3,this)">Vocal Clear</div>
+      <div class="chip" onclick="setEQPreset(6,-2,6,this)">Electronic</div>
+    </div>
+    <div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px;">
+      <div style="font-size:13px; font-weight:700; margin-bottom:8px;">🌙 おやすみスリープタイマー</div>
+      <div class="preset-chips">
+        <div class="chip active" onclick="setSleepTimer(0, this)">OFF</div>
+        <div class="chip" onclick="setSleepTimer(15, this)">15分</div>
+        <div class="chip" onclick="setSleepTimer(30, this)">30分</div>
+        <div class="chip" onclick="setSleepTimer(45, this)">45分</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- モーダル: FX変調 -->
+  <div class="sheet-modal" id="fxModal">
+    <div class="sheet-header">
+      <div class="sheet-title">⚡ FX変調 Studio</div>
+      <button class="close-btn" onclick="closeModals()">✕</button>
+    </div>
+    <div class="preset-chips" style="margin-bottom: 12px;">
+      <div class="chip active" onclick="setSpeedPreset(1.0, this)">Normal</div>
+      <div class="chip" onclick="setSpeedPreset(1.25, this)">🚀 Nightcore</div>
+      <div class="chip" onclick="setSpeedPreset(0.82, this)">🌙 Slowed</div>
+    </div>
+    <div class="slider-group">
+      <div class="slider-row">
+        <span>再生速度 / ピッチ</span>
+        <input type="range" id="speedSlider" min="0.5" max="1.5" step="0.05" value="1.0">
+      </div>
+      <div class="slider-row">
+        <span>📻 レコードノイズ (Lo-Fi)</span>
+        <input type="range" id="vinylSlider" min="0" max="100" value="0">
+      </div>
+    </div>
+  </div>
+
+  <!-- モーダル: 動画書き出し設定 -->
+  <div class="sheet-modal" id="exportModal">
+    <div class="sheet-header">
+      <div class="sheet-title">🎥 音付き 動画書き出し (MP4)</div>
+      <button class="close-btn" onclick="closeModals()">✕</button>
+    </div>
+
+    <div style="font-size:12px; font-weight:700; margin-bottom:6px;">⏱️ 書き出し時間</div>
+    <div class="preset-chips" id="exportLengthChips">
+      <div class="chip active" data-len="15">15秒 (ストーリー)</div>
+      <div class="chip" data-len="30">30秒 (リール/TikTok)</div>
+      <div class="chip" data-len="ab">サビ (AB区間)</div>
+      <div class="chip" data-len="full">曲フル</div>
+    </div>
+
+    <div style="font-size:12px; font-weight:700; margin:12px 0 6px;">📐 アスペクト比</div>
+    <div class="preset-chips" id="exportRatioChips">
+      <div class="chip active" data-ratio="1:1">1:1 正方形 (投稿)</div>
+      <div class="chip" data-ratio="9:16">9:16 縦長 (ストーリー)</div>
+    </div>
+
+    <div style="margin-top:12px;">
+      <label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;">
+        <input type="checkbox" id="exportLyricsToggle" checked> 🎤 Apple Music風 スライド歌詞を焼き込む
+      </label>
+    </div>
+
+    <div class="export-progress-box" id="exportProgressBox">
+      <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:600;">
+        <span id="exportStatusText">レンダリング中...</span>
+        <span id="exportPercentText">0%</span>
+      </div>
+      <div class="export-progress-bar">
+        <div class="export-progress-fill" id="exportProgressFill"></div>
+      </div>
+    </div>
+
+    <button class="tool-btn" id="startFastExportBtn" style="width:100%; justify-content:center; padding:10px; margin-top:16px; background:var(--accent-color); border:none; font-size:13px;">
+      🚀 音付き動画を生成する
+    </button>
+  </div>
+
+  <input type="file" id="file-input" accept="audio/*, .mp3, .m4a, .wav" multiple>
+  <input type="file" id="lrc-input" accept=".lrc, .txt">
+
+  <script>
+    // DOM参照
+    const fileInput = document.getElementById('file-input');
+    const lrcInput = document.getElementById('lrc-input');
+    const artworkBtn = document.getElementById('artworkBtn');
+    const artworkImg = document.getElementById('artworkImg');
+    const artworkPlaceholder = document.getElementById('artworkPlaceholder');
+    const playerCard = document.getElementById('playerCard');
+    const trackTitle = document.getElementById('trackTitle');
+    const trackArtist = document.getElementById('trackArtist');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const currentTimeEl = document.getElementById('currentTime');
+    const remainingTimeEl = document.getElementById('remainingTime');
+    const playBtn = document.getElementById('playBtn');
+    const playIcon = document.getElementById('playIcon');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const dynamicIsland = document.getElementById('dynamicIsland');
+    const islandArt = document.getElementById('islandArt');
+    const islandTitle = document.getElementById('islandTitle');
+    const spatialBtn = document.getElementById('spatialBtn');
+    const miniToggleBtn = document.getElementById('miniToggleBtn');
+    const demoSongBtn = document.getElementById('demoSongBtn');
+
+    const abRepeatBtn = document.getElementById('abRepeatBtn');
+    const abRepeatLabel = document.getElementById('abRepeatLabel');
+    const markerA = document.getElementById('markerA');
+    const markerB = document.getElementById('markerB');
+    let loopA = null;
+    let loopB = null;
+
+    const lyricsModal = document.getElementById('lyricsModal');
+    const eqModal = document.getElementById('eqModal');
+    const fxModal = document.getElementById('fxModal');
+    const exportModal = document.getElementById('exportModal');
+    const lyricsContainer = document.getElementById('lyricsContainer');
+
+    const audio = new Audio();
+    let currentRawAudioBuffer = null;
+    let playlist = [];
+    let currentIndex = 0;
+    let isDragging = false;
+    let animationFrameId = null;
+    let lyricsData = [];
+    let lyricsOffset = -0.25;
+    let is8DActive = false;
+    let pannerAngle = 0;
+    let sleepTimerId = null;
+
+    // Web Audio API
+    let audioCtx = null;
+    let sourceNode = null;
+    let analyserNode = null;
+    let bassFilter = null;
+    let midFilter = null;
+    let trebleFilter = null;
+    let pannerNode = null;
+    let vinylGainNode = null;
+    let vocalFilter = null;
+
+    // 星屑パーティクル (背景用)
+    const cosmicDust = [];
+    for (let i = 0; i < 45; i++) {
+      cosmicDust.push({
+        x: Math.random(),
+        y: Math.random(),
+        size: Math.random() * 1.8 + 0.6,
+        speed: Math.random() * 0.0004 + 0.0001,
+        alpha: Math.random() * 0.6 + 0.2
+      });
+    }
+
+    const PLAY_PATH = "M8 5v14l11-7z";
+    const PAUSE_PATH = "M6 19h4V5H6v14zm8-14v14h4V5h-4z";
+
+    // -------------------------------------------------------------
+    // 3D パララックス（カードの傾きエフェクト）
+    // -------------------------------------------------------------
+    document.addEventListener('mousemove', (e) => {
+      const x = (window.innerWidth / 2 - e.clientX) / 40;
+      const y = (window.innerHeight / 2 - e.clientY) / 40;
+      playerCard.style.transform = `rotateY(${-x}deg) rotateX(${y}deg)`;
+    });
+
+    // -------------------------------------------------------------
+    // 1. Web Audio API 初期化 (iPad完全対応)
+    // -------------------------------------------------------------
+    function initAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      if (!sourceNode) {
+        try {
+          sourceNode = audioCtx.createMediaElementSource(audio);
+          analyserNode = audioCtx.createAnalyser();
+          analyserNode.fftSize = 256;
+          analyserNode.smoothingTimeConstant = 0.8;
+
+          bassFilter = audioCtx.createBiquadFilter();
+          bassFilter.type = "lowshelf";
+          bassFilter.frequency.value = 80;
+
+          midFilter = audioCtx.createBiquadFilter();
+          midFilter.type = "peaking";
+          midFilter.frequency.value = 1000;
+
+          trebleFilter = audioCtx.createBiquadFilter();
+          trebleFilter.type = "highshelf";
+          trebleFilter.frequency.value = 8000;
+
+          vocalFilter = audioCtx.createBiquadFilter();
+          vocalFilter.type = "peaking";
+          vocalFilter.frequency.value = 1500;
+          vocalFilter.Q.value = 1.0;
+          vocalFilter.gain.value = 0;
+
+          if (audioCtx.createStereoPanner) {
+            pannerNode = audioCtx.createStereoPanner();
+          }
+
+          sourceNode.connect(vocalFilter);
+          vocalFilter.connect(bassFilter);
+          bassFilter.connect(midFilter);
+          midFilter.connect(trebleFilter);
+
+          let lastNode = trebleFilter;
+          if (pannerNode) {
+            lastNode.connect(pannerNode);
+            lastNode = pannerNode;
+          }
+
+          lastNode.connect(analyserNode);
+          analyserNode.connect(audioCtx.destination);
+
+          createVinylNoise();
+        } catch (e) {
+          console.warn("AudioContext setup fallback:", e);
+        }
+      }
+    }
+
+    function createVinylNoise() {
+      const bufferSize = audioCtx.sampleRate * 2;
+      const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const output = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = (Math.random() * 2 - 1) * (Math.random() > 0.985 ? 0.35 : 0.015);
+      }
+      const noiseSource = audioCtx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
+      noiseSource.loop = true;
+
+      vinylGainNode = audioCtx.createGain();
+      vinylGainNode.gain.value = 0;
+
+      noiseSource.connect(vinylGainNode);
+      vinylGainNode.connect(audioCtx.destination);
+      noiseSource.start();
+    }
+
+    // -------------------------------------------------------------
+    // 2. オーロラ背景 & 右側 リアルタイム波形レンダリング
+    // -------------------------------------------------------------
+    const canvas = document.getElementById('auroraCanvas');
+    const ctx = canvas.getContext('2d');
+    const liveCanvas = document.getElementById('liveVisualizerCanvas');
+    const liveCtx = liveCanvas.getContext('2d');
+    let themeColor = { r: 250, g: 45, b: 72 };
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      if (liveCanvas.parentElement) {
+        liveCanvas.width = liveCanvas.parentElement.clientWidth;
+        liveCanvas.height = liveCanvas.parentElement.clientHeight;
+      }
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function renderLoop() {
+      requestAnimationFrame(renderLoop);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      let bassEnergy = 0;
+      const freqData = new Uint8Array(analyserNode ? analyserNode.frequencyBinCount : 0);
+      if (analyserNode && !audio.paused) {
+        analyserNode.getByteFrequencyData(freqData);
+        bassEnergy = (freqData[1] + freqData[2] + freqData[3]) / 3 / 255;
+      }
+
+      // 1. オーロラ背景 ＆ 星屑パーティクル
+      const time = Date.now() * 0.0015;
+      const w = canvas.width;
+      const h = canvas.height;
+
+      const blobs = [
+        { x: w * 0.3 + Math.sin(time) * 100, y: h * 0.4 + Math.cos(time * 0.8) * 80, r: 260 + bassEnergy * 160, c: themeColor },
+        { x: w * 0.7 + Math.cos(time * 0.6) * 120, y: h * 0.6 + Math.sin(time * 0.9) * 90, r: 300 + bassEnergy * 180, c: { r: 120, g: 40, b: 240 } },
+        { x: w * 0.5 + Math.sin(time * 0.4) * 80, y: h * 0.8 + Math.cos(time * 0.5) * 70, r: 240 + bassEnergy * 120, c: { r: 20, g: 180, b: 255 } }
+      ];
+
+      blobs.forEach(b => {
+        const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+        grad.addColorStop(0, `rgba(${b.c.r}, ${b.c.g}, ${b.c.b}, 0.85)`);
+        grad.addColorStop(1, `rgba(${b.c.r}, ${b.c.g}, ${b.c.b}, 0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // 漂う星屑（Cosmic Dust）
+      ctx.save();
+      cosmicDust.forEach(p => {
+        p.y -= p.speed + bassEnergy * 0.0008;
+        if (p.y < 0) p.y = 1;
+        ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha + bassEnergy * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(p.x * w, p.y * h, p.size * (1 + bassEnergy * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+
+      if (is8DActive && pannerNode && !audio.paused) {
+        pannerAngle += 0.025;
+        pannerNode.pan.value = Math.sin(pannerAngle);
+      }
+
+      // 2. 右側パネル: 洗練されたピュアホワイト波形
+      if (liveCanvas.width > 0 && liveCanvas.height > 0) {
+        drawLiveSpectrumEngine(liveCtx, liveCanvas.width, liveCanvas.height, freqData, bassEnergy);
+      }
+    }
+    renderLoop();
+
+    // 🌟 洗練されたピュアホワイト・波形エンジン (リアルタイム)
+    function drawLiveSpectrumEngine(tCtx, w, h, freqData, bassEnergy) {
+      tCtx.clearRect(0, 0, w, h);
+
+      const cx = w / 2;
+      const cy = h / 2;
+
+      // 中央のアートワーク
+      const artR = Math.min(w, h) * 0.28 + bassEnergy * 12;
+      if (artworkImg.style.display !== 'none' && artworkImg.complete) {
+        tCtx.save();
+        tCtx.beginPath();
+        tCtx.arc(cx, cy - 20, artR, 0, Math.PI * 2);
+        tCtx.clip();
+        tCtx.drawImage(artworkImg, cx - artR, cy - 20 - artR, artR * 2, artR * 2);
+        tCtx.restore();
+      }
+
+      // ネオンリング
+      tCtx.save();
+      tCtx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+      tCtx.shadowColor = "rgba(255, 255, 255, 0.6)";
+      tCtx.shadowBlur = 16 + bassEnergy * 18;
+      tCtx.lineWidth = 3 + bassEnergy * 3;
+      tCtx.beginPath();
+      tCtx.arc(cx, cy - 20, artR + 4, 0, Math.PI * 2);
+      tCtx.stroke();
+      tCtx.restore();
+
+      // ピュアホワイト波形バー
+      const barCount = 42;
+      const barW = Math.max(4, (w * 0.72) / (barCount * 1.5));
+      const gap = barW * 0.5;
+      const totalW = barCount * (barW + gap);
+      const startX = cx - totalW / 2;
+      const baseY = h * 0.88;
+
+      tCtx.save();
+      tCtx.fillStyle = "rgba(255, 255, 255, 0.95)";
+      tCtx.shadowColor = "rgba(255, 255, 255, 0.4)";
+      tCtx.shadowBlur = 8;
+
+      for (let i = 0; i < barCount; i++) {
+        const rawVal = freqData.length > 0 ? freqData[Math.floor(i * (freqData.length / barCount))] / 255 : 0.05;
+        // 対数スケーリングで張り付き完全防止
+        const scaledVal = Math.pow(rawVal, 0.75);
+        const targetH = Math.max(6, scaledVal * (h * 0.22));
+        const x = startX + i * (barW + gap);
+
+        tCtx.beginPath();
+        tCtx.roundRect(x, baseY - targetH, barW, targetH, barW / 2);
+        tCtx.fill();
+      }
+      tCtx.restore();
+    }
+
+    // -------------------------------------------------------------
+    // 3. ファイル & メタデータ処理 & デモ生成
+    // -------------------------------------------------------------
+    artworkBtn.addEventListener('click', () => { initAudioContext(); fileInput.click(); });
+    document.getElementById('trackInfoBtn').addEventListener('click', () => { initAudioContext(); fileInput.click(); });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) handleFiles(Array.from(e.target.files));
+    });
+
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      initAudioContext();
+      if (e.dataTransfer.files.length > 0) handleFiles(Array.from(e.dataTransfer.files));
+    });
+
+    function handleFiles(files) {
+      playlist = files.filter(f => f.type.startsWith('audio/') || /\.(mp3|m4a|wav|ogg|flac)$/i.test(f.name));
+      if (playlist.length === 0) return;
+      currentIndex = 0;
+      loadTrack(currentIndex);
+    }
+
+    async function loadTrack(index) {
+      const file = playlist[index];
+      if (!file) return;
+
+      initAudioContext();
+      audio.pause();
+      progressBar.style.width = '0%';
+      currentTimeEl.textContent = '0:00';
+      remainingTimeEl.textContent = '-0:00';
+      clearABRepeat();
+
+      try {
+        const ab = await file.arrayBuffer();
+        const copyBuffer = ab.slice(0);
+        audioCtx.decodeAudioData(copyBuffer, (decoded) => {
+          currentRawAudioBuffer = decoded;
+        });
+      } catch (e) {
+        console.warn("Decode audio buffer error:", e);
+      }
+
+      audio.src = URL.createObjectURL(file);
+      audio.load();
+
+      let title = file.name.replace(/\.[^/.]+$/, "");
+      trackTitle.textContent = title;
+      islandTitle.textContent = title;
+      trackArtist.textContent = "読み込み中...";
+      resetArtwork();
+      generateDummyLyrics(title);
+
+      if (window.jsmediatags) {
+        try {
+          window.jsmediatags.read(file, {
+            onSuccess: function(tag) {
+              const tags = tag.tags;
+              if (tags.title) {
+                trackTitle.textContent = tags.title;
+                islandTitle.textContent = tags.title;
+              }
+              trackArtist.textContent = tags.artist || "不明なアーティスト";
+
+              if (tags.picture) {
+                const { data, format } = tags.picture;
+                const blob = new Blob([new Uint8Array(data)], { type: format });
+                setArtwork(URL.createObjectURL(blob));
+              }
+            }
+          });
+        } catch (e) {}
+      }
+
+      updateControls();
+      playAudio();
+    }
+
+    demoSongBtn.addEventListener('click', () => {
+      initAudioContext();
+      const sampleRate = audioCtx.sampleRate;
+      const duration = 20;
+      const buffer = audioCtx.createBuffer(2, sampleRate * duration, sampleRate);
+      const left = buffer.getChannelData(0);
+      const right = buffer.getChannelData(1);
+
+      const notes = [261.63, 329.63, 392.00, 523.25, 440.00, 349.23];
+      for (let i = 0; i < sampleRate * duration; i++) {
+        const t = i / sampleRate;
+        const note = notes[Math.floor(t * 2) % notes.length];
+        const synth = Math.sin(2 * Math.PI * note * t) * Math.exp(-(t % 0.5) * 4) * 0.25;
+        const kick = Math.sin(2 * Math.PI * 55 * t) * Math.exp(-(t % 1) * 10) * 0.35;
+        const vocal = Math.sin(2 * Math.PI * 1500 * t) * 0.15;
+
+        left[i] = synth * 0.8 + kick + vocal;
+        right[i] = synth * 0.4 + kick + vocal;
+      }
+
+      currentRawAudioBuffer = buffer;
+      const wavBlob = bufferToWave(buffer, buffer.length);
+      const demoFile = new File([wavBlob], "Clean_Studio_Demo.wav", { type: "audio/wav" });
+      handleFiles([demoFile]);
+    });
+
+    function bufferToWave(abuffer, len) {
+      let numOfChan = abuffer.numberOfChannels,
+          length = len * numOfChan * 2 + 44,
+          outBuffer = new ArrayBuffer(length),
+          view = new DataView(outBuffer),
+          channels = [], i, sample, offset = 0, pos = 0;
+
+      function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
+      function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
+
+      setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157);
+      setUint32(0x20746d66); setUint32(16); setUint16(1); setUint16(numOfChan);
+      setUint32(abuffer.sampleRate); setUint32(abuffer.sampleRate * 2 * numOfChan);
+      setUint16(numOfChan * 2); setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
+
+      for (i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
+      while (pos < length) {
+        for (i = 0; i < numOfChan; i++) {
+          sample = Math.max(-1, Math.min(1, channels[i][offset]));
+          sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+          view.setInt16(pos, sample, true);
+          pos += 2;
+        }
+        offset++;
+      }
+      return new Blob([outBuffer], { type: "audio/wav" });
+    }
+
+    function setArtwork(src) {
+      artworkImg.src = src;
+      artworkImg.style.display = 'block';
+      artworkPlaceholder.style.display = 'none';
+      islandArt.src = src;
+      dynamicIsland.classList.add('active');
+    }
+
+    function resetArtwork() {
+      artworkImg.src = '';
+      artworkImg.style.display = 'none';
+      artworkPlaceholder.style.display = 'flex';
+      islandArt.src = '';
+    }
+
+    // -------------------------------------------------------------
+    // 4. 再生コントロール & ループ & スライドシーク完全同期
+    // -------------------------------------------------------------
+    function playAudio() {
+      initAudioContext();
+      audio.play().then(() => {
+        playIcon.innerHTML = `<path d="${PAUSE_PATH}"/>`;
+        playBtn.classList.add('playing');
+        playerCard.classList.add('playing');
+        startProgressLoop();
+      }).catch((e) => console.log("Play error:", e));
+    }
+
+    function pauseAudio() {
+      audio.pause();
+      playIcon.innerHTML = `<path d="${PLAY_PATH}"/>`;
+      playBtn.classList.remove('playing');
+      playerCard.classList.remove('playing');
+      cancelAnimationFrame(animationFrameId);
+    }
+
+    function togglePlay() {
+      if (playlist.length === 0) return;
+      initAudioContext();
+      audio.paused ? playAudio() : pauseAudio();
+    }
+
+    function prevTrack() {
+      if (audio.currentTime > 3) audio.currentTime = 0;
+      else if (currentIndex > 0) { currentIndex--; loadTrack(currentIndex); }
+    }
+
+    function nextTrack() {
+      if (currentIndex < playlist.length - 1) { currentIndex++; loadTrack(currentIndex); }
+    }
+
+    function updateControls() {
+      playBtn.disabled = playlist.length === 0;
+      prevBtn.disabled = playlist.length <= 1;
+      nextBtn.disabled = playlist.length <= 1 || currentIndex === playlist.length - 1;
+    }
+
+    function formatTime(sec) {
+      if (isNaN(sec) || sec < 0) return "0:00";
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+
+    function startProgressLoop() {
+      cancelAnimationFrame(animationFrameId);
+      function loop() {
+        if (!isDragging && audio.duration) {
+          updateProgressUI(audio.currentTime);
+          updateLyricsSync(audio.currentTime);
+          handleABRepeat(audio.currentTime);
+        }
+        if (!audio.paused) animationFrameId = requestAnimationFrame(loop);
+      }
+      animationFrameId = requestAnimationFrame(loop);
+    }
+
+    function updateProgressUI(current) {
+      const dur = audio.duration;
+      if (dur) {
+        const percent = Math.min(Math.max((current / dur) * 100, 0), 100);
+        progressBar.style.width = `${percent}%`;
+        currentTimeEl.textContent = formatTime(current);
+        remainingTimeEl.textContent = `-${formatTime(Math.max(dur - current, 0))}`;
+      }
+    }
+
+    function handleABRepeat(current) {
+      if (loopA !== null && loopB !== null && current >= loopB) {
+        audio.currentTime = loopA;
+      }
+    }
+
+    audio.addEventListener('ended', () => {
+      if (currentIndex < playlist.length - 1) nextTrack();
+      else { pauseAudio(); audio.currentTime = 0; }
+    });
+
+    // スライド（ドラッグ）シーク完全対応
+    function getSeekRatio(clientX) {
+      const rect = progressContainer.querySelector('.progress-bar-wrapper').getBoundingClientRect();
+      return Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+    }
+
+    function handleSeekMove(clientX) {
+      if (!audio.duration) return;
+      const ratio = getSeekRatio(clientX);
+      const targetTime = ratio * audio.duration;
+      updateProgressUI(targetTime);
+      return targetTime;
+    }
+
+    progressContainer.addEventListener('mousedown', (e) => {
+      if (!audio.duration) return;
+      isDragging = true;
+      progressContainer.classList.add('dragging');
+      handleSeekMove(e.clientX);
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (isDragging && audio.duration) {
+        handleSeekMove(e.clientX);
+      }
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (isDragging && audio.duration) {
+        const targetTime = handleSeekMove(e.clientX);
+        audio.currentTime = targetTime;
+        isDragging = false;
+        progressContainer.classList.remove('dragging');
+      }
+    });
+
+    progressContainer.addEventListener('touchstart', (e) => {
+      if (!audio.duration) return;
+      isDragging = true;
+      progressContainer.classList.add('dragging');
+      handleSeekMove(e.touches[0].clientX);
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (isDragging && audio.duration) {
+        handleSeekMove(e.touches[0].clientX);
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', (e) => {
+      if (isDragging && audio.duration) {
+        const clientX = e.changedTouches ? e.changedTouches[0].clientX : 0;
+        const targetTime = handleSeekMove(clientX);
+        audio.currentTime = targetTime;
+        isDragging = false;
+        progressContainer.classList.remove('dragging');
+      }
+    });
+
+    playBtn.addEventListener('click', togglePlay);
+    prevBtn.addEventListener('click', prevTrack);
+    nextBtn.addEventListener('click', nextTrack);
+
+    // -------------------------------------------------------------
+    // 5. 歌詞解析 (ミリ秒高精度) & タイミング調整
+    // -------------------------------------------------------------
+    lrcInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => parseLRC(ev.target.result);
+      reader.readAsText(file);
+    });
+
+    function parseLRC(text) {
+      lyricsData = [];
+      const lines = text.split('\n');
+      const timeExp = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/;
+      lines.forEach(line => {
+        const match = timeExp.exec(line);
+        if (match) {
+          const min = parseInt(match[1], 10);
+          const sec = parseInt(match[2], 10);
+          const msStr = match[3] || "0";
+          const ms = msStr.length === 2 ? parseInt(msStr, 10) / 100 : parseInt(msStr, 10) / 1000;
+          const time = min * 60 + sec + ms;
+          const txt = line.replace(timeExp, '').trim();
+          if (txt) lyricsData.push({ time: time, text: txt });
+        }
+      });
+      renderLyricsView();
+    }
+
+    function generateDummyLyrics(title) {
+      lyricsData = [
+        { time: 0, text: `♪ ${title}` },
+        { time: 4, text: "Apple Music Sing モード起動中" },
+        { time: 8, text: "上下ボケのスライド歌詞が滑らかに流れます" },
+        { time: 13, text: "LRC歌詞ファイルを読み込むと完全同期" },
+        { time: 18, text: "好きな音楽を最高の音質と映像で楽しもう" }
+      ];
+      renderLyricsView();
+    }
+
+    function renderLyricsView() {
+      lyricsContainer.innerHTML = '';
+      lyricsData.forEach((item, i) => {
+        const div = document.createElement('div');
+        div.className = `lyrics-line ${i === 0 ? 'current' : ''}`;
+        div.textContent = item.text;
+        div.onclick = () => { audio.currentTime = item.time; };
+        lyricsContainer.appendChild(div);
+      });
+    }
+
+    function updateLyricsSync(currentTime) {
+      if (lyricsData.length === 0) return;
+      const adjustedTime = currentTime + lyricsOffset;
+      let activeIndex = 0;
+      for (let i = 0; i < lyricsData.length; i++) {
+        if (adjustedTime >= lyricsData[i].time) activeIndex = i;
+      }
+      const lines = lyricsContainer.children;
+      Array.from(lines).forEach((line, i) => {
+        if (i === activeIndex) {
+          line.classList.add('current');
+          line.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          line.classList.remove('current');
+        }
+      });
+    }
+
+    document.getElementById('offsetSlider').addEventListener('input', (e) => {
+      lyricsOffset = -0.25 + parseFloat(e.target.value);
+    });
+
+    document.getElementById('vocalSlider').addEventListener('input', (e) => {
+      initAudioContext();
+      if (vocalFilter) {
+        vocalFilter.gain.value = -(e.target.value / 100) * 35;
+      }
+    });
+
+    // -------------------------------------------------------------
+    // 6. EQ, スリープタイマー, FX, ABリピート
+    // -------------------------------------------------------------
+    document.getElementById('bassSlider').addEventListener('input', (e) => {
+      if (bassFilter) bassFilter.gain.value = e.target.value;
+    });
+    document.getElementById('midSlider').addEventListener('input', (e) => {
+      if (midFilter) midFilter.gain.value = e.target.value;
+    });
+    document.getElementById('trebleSlider').addEventListener('input', (e) => {
+      if (trebleFilter) trebleFilter.gain.value = e.target.value;
+    });
+
+    function setEQPreset(b, m, t, el) {
+      document.querySelectorAll('#eqModal .chip').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      document.getElementById('bassSlider').value = b;
+      document.getElementById('midSlider').value = m;
+      document.getElementById('trebleSlider').value = t;
+      if (bassFilter) bassFilter.gain.value = b;
+      if (midFilter) midFilter.gain.value = m;
+      if (trebleFilter) trebleFilter.gain.value = t;
+    }
+
+    function setSleepTimer(minutes, el) {
+      document.querySelectorAll('#eqModal .chip').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      clearTimeout(sleepTimerId);
+      if (minutes > 0) {
+        sleepTimerId = setTimeout(() => {
+          let fade = setInterval(() => {
+            if (audio.volume > 0.05) audio.volume -= 0.05;
+            else {
+              clearInterval(fade);
+              pauseAudio();
+              audio.volume = 1;
+              alert("🌙 スリープタイマーにより音楽を停止しました。");
+            }
+          }, 200);
+        }, minutes * 60 * 1000);
+      }
+    }
+
+    spatialBtn.addEventListener('click', () => {
+      initAudioContext();
+      is8DActive = !is8DActive;
+      spatialBtn.classList.toggle('active', is8DActive);
+      spatialBtn.textContent = is8DActive ? "🌐 8D音響: ON" : "🌐 8D音響: OFF";
+      if (!is8DActive && pannerNode) pannerNode.pan.value = 0;
+    });
+
+    const speedSlider = document.getElementById('speedSlider');
+    speedSlider.addEventListener('input', (e) => { audio.playbackRate = parseFloat(e.target.value); });
+
+    function setSpeedPreset(val, el) {
+      document.querySelectorAll('#fxModal .chip').forEach(c => c.classList.remove('active'));
+      el.classList.add('active');
+      speedSlider.value = val;
+      audio.playbackRate = val;
+    }
+
+    document.getElementById('vinylSlider').addEventListener('input', (e) => {
+      initAudioContext();
+      if (vinylGainNode) vinylGainNode.gain.value = (e.target.value / 100) * 0.3;
+    });
+
+    abRepeatBtn.addEventListener('click', () => {
+      if (!audio.duration) return;
+      if (loopA === null) {
+        loopA = audio.currentTime;
+        markerA.style.left = `${(loopA / audio.duration) * 100}%`;
+        markerA.style.display = 'block';
+        abRepeatLabel.textContent = "B点を指定";
+        abRepeatBtn.classList.add('highlight');
+      } else if (loopB === null) {
+        if (audio.currentTime > loopA) {
+          loopB = audio.currentTime;
+          markerB.style.left = `${(loopB / audio.duration) * 100}%`;
+          markerB.style.display = 'block';
+          abRepeatLabel.textContent = "ABループ中";
+          audio.currentTime = loopA;
+        }
+      } else {
+        clearABRepeat();
+      }
+    });
+
+    function clearABRepeat() {
+      loopA = null;
+      loopB = null;
+      markerA.style.display = 'none';
+      markerB.style.display = 'none';
+      abRepeatLabel.textContent = "ABリピート";
+      abRepeatBtn.classList.remove('highlight');
+    }
+
+    miniToggleBtn.addEventListener('click', () => {
+      playerCard.style.transform = 'scale(0.85) translateY(100px)';
+      playerCard.style.opacity = '0';
+      playerCard.style.pointerEvents = 'none';
+      dynamicIsland.classList.add('active');
+    });
+
+    dynamicIsland.addEventListener('click', () => {
+      playerCard.style.transform = 'scale(1) translateY(0)';
+      playerCard.style.opacity = '1';
+      playerCard.style.pointerEvents = 'auto';
+    });
+
+    document.getElementById('lyricsBtn').addEventListener('click', () => openModal(lyricsModal));
+    document.getElementById('eqBtn').addEventListener('click', () => openModal(eqModal));
+    document.getElementById('fxBtn').addEventListener('click', () => openModal(fxModal));
+    document.getElementById('exportModalBtn').addEventListener('click', () => openModal(exportModal));
+
+    function openModal(modal) { closeModals(); modal.classList.add('open'); }
+    function closeModals() { document.querySelectorAll('.sheet-modal').forEach(m => m.classList.remove('open')); }
+
+    document.querySelectorAll('#exportLengthChips .chip').forEach(chip => {
+      chip.addEventListener('click', function() {
+        document.querySelectorAll('#exportLengthChips .chip').forEach(c => c.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+    document.querySelectorAll('#exportRatioChips .chip').forEach(chip => {
+      chip.addEventListener('click', function() {
+        document.querySelectorAll('#exportRatioChips .chip').forEach(c => c.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+
+    // -------------------------------------------------------------
+    // 7. 音付きMP4動画レンダリング (対数波形 ＆ 上下ボケスライド歌詞)
+    // -------------------------------------------------------------
+    const startFastExportBtn = document.getElementById('startFastExportBtn');
+    const exportProgressBox = document.getElementById('exportProgressBox');
+    const exportProgressFill = document.getElementById('exportProgressFill');
+    const exportPercentText = document.getElementById('exportPercentText');
+    const exportStatusText = document.getElementById('exportStatusText');
+
+    // 対数スケーリングによる真の周波数抽出（張り付き完全防止）
+    function getAccurateSpectrumBars(curTime, barCount) {
+      const bars = new Float32Array(barCount);
+      if (!currentRawAudioBuffer) {
+        for (let i = 0; i < barCount; i++) bars[i] = 0.1;
+        return { bars: bars, bassEnergy: 0.1 };
+      }
+
+      const sampleRate = currentRawAudioBuffer.sampleRate;
+      const centerSample = Math.floor(curTime * sampleRate);
+      const left = currentRawAudioBuffer.getChannelData(0);
+      const windowSize = 1024;
+      const step = Math.floor(windowSize / barCount);
+      let totalBass = 0;
+
+      for (let b = 0; b < barCount; b++) {
+        let sum = 0;
+        let count = 0;
+        for (let s = 0; s < step; s++) {
+          const idx = centerSample - (windowSize / 2) + (b * step) + s;
+          if (idx >= 0 && idx < left.length) {
+            sum += Math.abs(left[idx]);
+            count++;
+          }
+        }
+        const freqBoost = 1.0 + (b / barCount) * 1.5;
+        const rawAmp = count > 0 ? (sum / count) * 3.2 * freqBoost : 0.05;
+        // 平方根による対数圧縮（爆音でも天井に張り付かない）
+        bars[b] = Math.min(Math.pow(rawAmp, 0.72), 0.95);
+        if (b < 4) totalBass += bars[b];
+      }
+
+      return { bars: bars, bassEnergy: Math.min(totalBass / 4, 1.0) };
+    }
+
+    startFastExportBtn.addEventListener('click', async () => {
+      if (!audio.duration) {
+        alert("先に曲を読み込んでください！");
+        return;
+      }
+      initAudioContext();
+
+      const lenType = document.querySelector('#exportLengthChips .chip.active').dataset.len;
+      const ratioType = document.querySelector('#exportRatioChips .chip.active').dataset.ratio;
+      const includeLyrics = document.getElementById('exportLyricsToggle').checked;
+
+      let startSec = 0;
+      let totalSec = 15;
+
+      if (lenType === '15') {
+        startSec = audio.currentTime;
+        totalSec = 15;
+      } else if (lenType === '30') {
+        startSec = audio.currentTime;
+        totalSec = 30;
+      } else if (lenType === 'ab') {
+        if (loopA !== null && loopB !== null && loopB > loopA) {
+          startSec = loopA;
+          totalSec = loopB - loopA;
+        } else {
+          startSec = audio.currentTime;
+          totalSec = 15;
+        }
+      } else if (lenType === 'full') {
+        startSec = 0;
+        totalSec = audio.duration;
+      }
+
+      totalSec = Math.min(totalSec, audio.duration - startSec);
+      if (totalSec <= 0) totalSec = 10;
+
+      const isVertical = ratioType === '9:16';
+      const width = 720;
+      const height = isVertical ? 1280 : 720;
+      const fps = 30;
+
+      exportProgressBox.style.display = 'block';
+      startFastExportBtn.disabled = true;
+      exportStatusText.textContent = "音声・映像を合成中 (iPad最適化)...";
+
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = width;
+      offCanvas.height = height;
+      const octx = offCanvas.getContext('2d');
+
+      const stream = offCanvas.captureStream(fps);
+      const dest = audioCtx.createMediaStreamDestination();
+
+      const audioSource = audioCtx.createBufferSource();
+      audioSource.buffer = currentRawAudioBuffer;
+      audioSource.connect(dest);
+
+      const combinedStream = new MediaStream([
+        stream.getVideoTracks()[0],
+        dest.stream.getAudioTracks()[0]
+      ]);
+
+      let mimeType = 'video/mp4';
+      if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) {
+        mimeType = 'video/mp4;codecs=avc1,mp4a.40.2';
+      } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+        mimeType = 'video/mp4';
+      }
+
+      const recorder = new MediaRecorder(combinedStream, { mimeType: mimeType });
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mimeType });
+        downloadBlob(blob, `${trackTitle.textContent}_MasterStudio.mp4`);
+        exportProgressBox.style.display = 'none';
+        startFastExportBtn.disabled = false;
+        closeModals();
+      };
+
+      recorder.start();
+      audioSource.start(0, startSec, totalSec);
+
+      const totalFrames = Math.floor(totalSec * fps);
+      for (let f = 0; f < totalFrames; f++) {
+        const curTime = startSec + (f / fps);
+        drawCleanExportFrame(octx, width, height, isVertical, curTime, includeLyrics);
+
+        if (f % 5 === 0 || f === totalFrames - 1) {
+          const pct = Math.floor((f / totalFrames) * 100);
+          exportPercentText.textContent = `${pct}%`;
+          exportProgressFill.style.width = `${pct}%`;
+          exportStatusText.textContent = `音付き動画生成中 (${f}/${totalFrames})`;
+        }
+        await new Promise(r => setTimeout(r, 1000 / fps));
+      }
+
+      recorder.stop();
+      audioSource.stop();
+    });
+
+    // 🎨 【極上レイアウト ＆ 張り付かない波形 ＆ 上下ボケスライド歌詞】
+    function drawCleanExportFrame(ctx, w, h, isVertical, curTime, showLyrics) {
+      ctx.save();
+      ctx.fillStyle = "#060709";
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+
+      const cx = w / 2;
+      const barCount = 42;
+      const { bars, bassEnergy } = getAccurateSpectrumBars(curTime, barCount);
+
+      // 1. 背景オーロラ ＆ 漂う星屑
+      ctx.save();
+      const bgCenterY = isVertical ? 380 : h / 2;
+      const bgGrad = ctx.createRadialGradient(cx, bgCenterY, 30, cx, bgCenterY, w * 0.75 + bassEnergy * 40);
+      bgGrad.addColorStop(0, "rgba(250, 45, 72, 0.4)");
+      bgGrad.addColorStop(0.5, "rgba(120, 40, 240, 0.2)");
+      bgGrad.addColorStop(1, "rgba(6, 7, 9, 0.96)");
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      // 動画内星屑パーティクル
+      cosmicDust.forEach((p, idx) => {
+        const py = ((p.y - curTime * 0.02 + idx * 0.1) % 1 + 1) % 1;
+        ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha * 0.7 + bassEnergy * 0.3})`;
+        ctx.beginPath();
+        ctx.arc(p.x * w, py * h, p.size * (1 + bassEnergy * 0.4), 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+
+      // 2. アートワーク ＆ 回転する飛び出しCD (動画内でも再現！)
+      const artSize = isVertical ? 320 : 210;
+      const artX = (w - artSize) / 2;
+      const artY = isVertical ? 140 : 50;
+
+      // 飛び出しCD (動画内)
+      ctx.save();
+      const cdR = artSize * 0.44;
+      const cdX = cx + (artSize * 0.24);
+      const cdY = artY + artSize / 2;
+      ctx.translate(cdX, cdY);
+      ctx.rotate(curTime * 1.5);
+      
+      ctx.fillStyle = "#111111";
+      ctx.beginPath();
+      ctx.arc(0, 0, cdR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.2)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, cdR * 0.65, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // アートワーク本体
+      if (artworkImg.style.display !== 'none' && artworkImg.complete) {
+        ctx.save();
+        ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
+        ctx.shadowBlur = 25;
+        ctx.beginPath();
+        ctx.roundRect(artX, artY, artSize, artSize, 24);
+        ctx.clip();
+        ctx.drawImage(artworkImg, artX, artY, artSize, artSize);
+        ctx.restore();
+      }
+
+      // 3. ✍️ 曲名・アーティスト (アートワーク直下に独立配置)
+      const titleY = isVertical ? (artY + artSize + 52) : (artY + artSize + 38);
+      const artistY = isVertical ? (titleY + 30) : (titleY + 24);
+
+      ctx.save();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `bold ${isVertical ? 27 : 19}px -apple-system, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.shadowColor = "rgba(0,0,0,0.8)";
+      ctx.shadowBlur = 6;
+      ctx.fillText(trackTitle.textContent, cx, titleY);
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+      ctx.font = `500 ${isVertical ? 17 : 13}px -apple-system, sans-serif`;
+      ctx.fillText(trackArtist.textContent, cx, artistY);
+      ctx.restore();
+
+      // 4. 🌊 【躍動するピュアホワイト波形】(張り付き防止・絶妙な高さ)
+      const barW = Math.max(4, (w * (isVertical ? 0.78 : 0.68)) / (barCount * 1.5));
+      const gap = barW * 0.5;
+      const totalW = barCount * (barW + gap);
+      const startX = cx - totalW / 2;
+      const barBaseY = isVertical ? (artistY + 80) : (h - 145);
+
+      ctx.save();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+      ctx.shadowColor = "rgba(255, 255, 255, 0.4)";
+      ctx.shadowBlur = 8;
+
+      for (let i = 0; i < barCount; i++) {
+        const val = bars[i];
+        const barH = Math.max(6, val * (isVertical ? 75 : 55));
+        const bx = startX + i * (barW + gap);
+
+        ctx.beginPath();
+        ctx.roundRect(bx, barBaseY - barH, barW, barH, barW / 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // 5. 🎤 【Apple Music風 上下ボケ＆ヌルヌルスライド複数行歌詞】
+      if (showLyrics && lyricsData.length > 0) {
+        let activeIdx = 0;
+        const adjustedTime = curTime + lyricsOffset;
+        for (let i = 0; i < lyricsData.length; i++) {
+          if (adjustedTime >= lyricsData[i].time) activeIdx = i;
+        }
+
+        const lyricCenterY = isVertical ? 980 : (h - 60);
+        const lineSpacing = isVertical ? 48 : 34;
+
+        // 上下2行（合計5行）をレンダリング
+        for (let offset = -2; offset <= 2; offset++) {
+          const targetIdx = activeIdx + offset;
+          if (targetIdx >= 0 && targetIdx < lyricsData.length) {
+            const item = lyricsData[targetIdx];
+            const y = lyricCenterY + (offset * lineSpacing);
+
+            ctx.save();
+            if (offset === 0) {
+              // 現在行: 純白で大きくクリアに発光
+              ctx.fillStyle = "#ffffff";
+              ctx.font = `bold ${isVertical ? 25 : 17}px -apple-system, sans-serif`;
+              ctx.shadowColor = "rgba(250, 45, 72, 0.9)";
+              ctx.shadowBlur = 16;
+            } else {
+              // 上下の行: ボケて半透明
+              const distFromCenter = Math.abs(offset);
+              const alpha = distFromCenter === 1 ? 0.35 : 0.15;
+              ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+              ctx.font = `600 ${isVertical ? 21 : 14}px -apple-system, sans-serif`;
+              ctx.shadowBlur = 0;
+            }
+            ctx.textAlign = "center";
+            ctx.fillText(item.text, cx, y);
+            ctx.restore();
+          }
+        }
+      }
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && playlist.length > 0 && e.target.tagName !== 'INPUT') {
+        e.preventDefault();
+        togglePlay();
+      }
+    });
+  </script>
+</body>
+</html>
